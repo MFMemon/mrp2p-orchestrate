@@ -1,0 +1,9 @@
+client/
+server/
+plugin/
+input/
+p2p/
+config.json
+p2prc.PublicKeyBareMetal
+p2prc.privateKey
+mrp2prun
