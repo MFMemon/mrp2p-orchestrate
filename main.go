@@ -66,7 +66,7 @@ func main() {
 	// 	return
 	// }
 
-	err := cleanUpDir("server", "client", "plugin", "config.json")
+	err := cleanUpDir("server", "client", "plugin", "config.json", "cc.json")
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
@@ -93,11 +93,22 @@ func main() {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	time.Sleep(time.Second * 10) // wait for file system to be initialized
+	time.Sleep(time.Second * 20) // wait for file system to be initialized
 
 	err = deployments.FSUpload("mrInput", *mrInputLocalDir)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
+
+	b, err := deployments.MarshalClusterConfig()
+	if err != nil {
+		utils.Logger().Fatal(err.Error())
+	}
+
+	err = os.WriteFile("cc.json", b, 0777)
+	if err != nil {
+		utils.Logger().Fatal(err.Error())
+	}
+	utils.Logger().Infof("cc.json written successfully")
 
 }

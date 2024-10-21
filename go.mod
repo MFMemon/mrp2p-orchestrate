@@ -2,11 +2,14 @@ module github.com/MFMemon/mrp2p-orchestrate
 
 go 1.23.1
 
-replace github.com/Akilan1999/p2p-rendering-computation v1.1.1 => github.com/MFMemon/p2p-rendering-computation v1.1.2-0.20241020082333-b164b0bfdc5d
+replace github.com/Akilan1999/p2p-rendering-computation v1.1.1 => github.com/MFMemon/p2p-rendering-computation v1.1.2-0.20241021163616-8f332535185f
 
 require github.com/Akilan1999/p2p-rendering-computation v1.1.1
 
-require go.uber.org/multierr v1.10.0 // indirect
+require (
+	github.com/google/go-cmp v0.6.0 // indirect
+	go.uber.org/multierr v1.10.0 // indirect
+)
 
 require (
 	github.com/Azure/go-ntlmssp v0.0.0-20200615164410-66371956d46c // indirect
@@ -40,7 +43,6 @@ require (
 	github.com/go-playground/universal-translator v0.18.0 // indirect
 	github.com/go-playground/validator/v10 v10.11.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/glog v1.2.2
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.3 // indirect
 	github.com/google/uuid v1.3.0 // indirect

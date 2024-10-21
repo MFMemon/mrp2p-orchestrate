@@ -1,11 +1,11 @@
 package deployments
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strconv"
 
@@ -17,34 +17,51 @@ import (
 type DeployedNodes map[string]*NodeConnInfo
 
 type NodeConnInfo struct {
-	ContainerId string
-	Ip          string
-	Grpcport    vms.Port
-	Httpport    vms.Port
+	ContainerId string   `json:"NodeId"`
+	Ip          string   `json:"Ip"`
+	Grpcport    vms.Port `json:"-"`
+	Httpport    vms.Port `json:"Port"`
+}
+
+type ClusterConfig struct {
+	MRWorkerIds      []string      `json:"MRWorkerIds"`
+	MREtcdId         []string      `json:"MREtcdId"`
+	MRP2PClusterInfo DeployedNodes `json:"MRP2PClusterInfo"`
 }
 
 var nodesConnInfo DeployedNodes = make(DeployedNodes)
 
+func MarshalClusterConfig() ([]byte, error) {
+	cc := ClusterConfig{
+		MRWorkerIds:      []string{"mrworker1", "mrworker2"},
+		MREtcdId:         []string{"mretcd"},
+		MRP2PClusterInfo: nodesConnInfo,
+	}
+	file, err := json.MarshalIndent(cc, "", "\t")
+	return file, err
+}
+
 func FSUpload(fsDir string, localDir string) error {
 	fsFilerAddr := net.JoinHostPort(nodesConnInfo["fsfiler"].Ip, nodesConnInfo["fsfiler"].Httpport.HostPort)
-	fsFilerUrl := fmt.Sprintf("https://%v/%v", fsFilerAddr, fsDir)
-	// postUrl, err := url.JoinPath(fsFilerAddr, fsDir)
-	// if err != nil {
-	// 	return err
-	// }
+	fsFilerUrl := fmt.Sprintf("http://%v/%v/", fsFilerAddr, fsDir)
+	cli := http.Client{}
 
 	err := filepath.WalkDir(localDir, func(path string, d fs.DirEntry, err error) error {
 
+		fmt.Println(path)
 		if d.IsDir() {
 			return nil
 		}
 
-		_, httperr := http.PostForm(fsFilerUrl, url.Values{
-			"filename": {path},
-		})
+		respBytes, httperr := abs.UploadFile(cli, fsFilerUrl, "filename", path)
 		if httperr != nil {
+			fmt.Println(httperr)
 			return err
 		}
+		// fmt.Println(string(respBytes))
+
+		utils.Logger().Infof("File upload succes: %v", string(respBytes))
+
 		return nil
 	})
 
@@ -66,32 +83,59 @@ func FSUpload(fsDir string, localDir string) error {
 
 func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
 
+	// wg := new(sync.WaitGroup)
+	// wg.Add(3)
+
+	// errChan := make(chan error, 3)
+	// defer close(errChan)
+
 	fsMasterNode, err := startFsMasterNode(peerWithLowestRam.MasterContainer)
 	if err != nil {
 		return err
 	}
 	nodesConnInfo["fsmaster"] = fsMasterNode
 
+	// go func() {
 	etcdNode, err := startEtcdNode(peerWithLowestRam.MasterContainer)
 	if err != nil {
+		// errChan <- err
+		// wg.Done()
 		return err
 	}
-	nodesConnInfo["etcd"] = etcdNode
+	nodesConnInfo["mretcd"] = etcdNode
+	// wg.Done()
+	// }()
 
+	// go func() {
 	fsVolumeNodes, err := startFsVolumeNodes(peers, nodesConnInfo["fsmaster"])
 	if err != nil {
+		// errChan <- err
+		// wg.Done()
 		return err
 	}
 	for i := range fsVolumeNodes {
 		volumeName := "fsvolume" + strconv.Itoa(i)
 		nodesConnInfo[volumeName] = fsVolumeNodes[i]
 	}
+	// wg.Done()
+	// }()
 
+	// go func() {
 	fsFilerNode, err := startFsFilerNode(peerWithLowestRam.MasterContainer, nodesConnInfo["fsmaster"])
 	if err != nil {
+		// errChan <- err
+		// wg.Done()
 		return err
 	}
 	nodesConnInfo["fsfiler"] = fsFilerNode
+	// wg.Done()
+	// }()
+
+	// wg.Wait()
+
+	// if len(errChan) > 0 {
+	// 	return <-errChan
+	// }
 
 	return nil
 }
@@ -153,8 +197,8 @@ func startEtcdNode(con *vms.ContainerInfo) (*NodeConnInfo, error) {
 	nodeConn := new(NodeConnInfo)
 	nodeConn.ContainerId = con.Id
 	nodeConn.Ip = con.Ip
-	nodeConn.Grpcport.ContainerPort = requiredPort.ContainerPort
-	nodeConn.Grpcport.HostPort = requiredPort.HostPort
+	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
+	nodeConn.Httpport.HostPort = requiredPort.HostPort
 
 	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2petcd")
 	if err != nil {
@@ -167,7 +211,7 @@ func startEtcdNode(con *vms.ContainerInfo) (*NodeConnInfo, error) {
 	}
 
 	utils.Logger().Infof("etcd server started at %v",
-		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Grpcport.HostPort),
+		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Httpport.HostPort),
 	)
 
 	return nodeConn, nil

@@ -7,3 +7,4 @@ config.json
 p2prc.PublicKeyBareMetal
 p2prc.privateKey
 mrp2prun
+cc.json

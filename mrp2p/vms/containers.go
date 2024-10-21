@@ -15,10 +15,10 @@ type ContainerInfo struct {
 }
 
 type Port struct {
-	Name          string
-	ContainerPort string
-	HostPort      string
-	Taken         bool
+	Name          string `json:"-"`
+	ContainerPort string `json:"LocalPort"`
+	HostPort      string `json:"PublicPort"`
+	Taken         bool   `json:"-"`
 }
 
 func spinUpContainer(targetPeer *Peer, numOfFsPorts int, numOfMrPorts int, isMaster bool) error {
