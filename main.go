@@ -15,11 +15,13 @@ import (
 )
 
 var (
-	mrInputLocalDir        = flag.String("in", "", "absolute local path of the input files for mapreduce job")
-	mrRbScriptLocalDir     = flag.String("rbs", "", "absolute local path of the record boundary finder script for mapreduce job")
-	mrMapScriptLocalDir    = flag.String("ms", "", "absolute local path of the map function script for mapreduce job")
-	mrReduceScriptLocalDir = flag.String("rs", "", "absolute local path of the reduce function script for mapreduce job")
-	mrWorkerScaleFactor    = flag.Int("ws", 4, "number of worker nodes required for mapreduce job")
+	mrInputLocalDir        = flag.String("i", "", "absolute local path of the input files for mapreduce job")
+	mrRbScriptLocalDir     = flag.String("b", "", "absolute local path of the record boundary finder script for mapreduce job")
+	mrMapScriptLocalDir    = flag.String("m", "", "absolute local path of the map function script for mapreduce job")
+	mrReduceScriptLocalDir = flag.String("r", "", "absolute local path of the reduce function script for mapreduce job")
+	mrReduceOutDirName     = flag.String("o", "", "directory name of the final output files")
+	mrWorkerScaleFactor    = flag.Int("s", 4, "number of worker nodes required for mapreduce job")
+	mrNumOfOutFiles        = flag.Int("n", 2, "number of final output files to be created")
 )
 
 func cleanUpDir(paths ...string) error {
@@ -93,9 +95,19 @@ func main() {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	time.Sleep(time.Second * 20) // wait for file system to be initialized
+	time.Sleep(time.Second * 60) // wait for file system to be initialized
 
 	err = deployments.FSUpload("mrInput", *mrInputLocalDir)
+	if err != nil {
+		utils.Logger().Fatal(err.Error())
+	}
+
+	err = deployments.FSUpload("mrMapFunc", *mrMapScriptLocalDir)
+	if err != nil {
+		utils.Logger().Fatal(err.Error())
+	}
+
+	err = deployments.FSUpload("mrReduceFunc", *mrReduceScriptLocalDir)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
@@ -105,7 +117,7 @@ func main() {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	err = os.WriteFile("cc.json", b, 0777)
+	err = os.WriteFile("/tmp/cc.json", b, 0777)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}

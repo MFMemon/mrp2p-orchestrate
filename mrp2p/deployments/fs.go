@@ -25,18 +25,28 @@ type NodeConnInfo struct {
 
 type ClusterConfig struct {
 	MRWorkerIds      []string      `json:"MRWorkerIds"`
-	MREtcdId         []string      `json:"MREtcdId"`
+	MREtcdIds        []string      `json:"MREtcdIds"`
+	FSMasterIds      []string      `json:"FSMasterIds"`
+	FSVolumeIds      []string      `json:"FSVolumeIds"`
+	FSFilerIds       []string      `json:"FSFilerIds"`
 	MRP2PClusterInfo DeployedNodes `json:"MRP2PClusterInfo"`
 }
 
-var nodesConnInfo DeployedNodes = make(DeployedNodes)
+var (
+	nodesConnInfo DeployedNodes = make(DeployedNodes)
+	cc            ClusterConfig
+)
 
 func MarshalClusterConfig() ([]byte, error) {
-	cc := ClusterConfig{
-		MRWorkerIds:      []string{"mrworker1", "mrworker2"},
-		MREtcdId:         []string{"mretcd"},
-		MRP2PClusterInfo: nodesConnInfo,
-	}
+	// cc := ClusterConfig{
+	// 	MRWorkerIds:      []string{"mrworker1", "mrworker2"},
+	// 	MREtcdId:         []string{"mretcd"},
+	// 	MRP2PClusterInfo: nodesConnInfo,
+	// }
+	cc.MRWorkerIds = append(cc.MRWorkerIds, "mrworker1")
+	cc.MRWorkerIds = append(cc.MRWorkerIds, "mrworker2")
+	cc.MRP2PClusterInfo = nodesConnInfo
+
 	file, err := json.MarshalIndent(cc, "", "\t")
 	return file, err
 }
@@ -94,6 +104,7 @@ func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
 		return err
 	}
 	nodesConnInfo["fsmaster"] = fsMasterNode
+	cc.FSMasterIds = append(cc.FSMasterIds, "fsmaster")
 
 	// go func() {
 	etcdNode, err := startEtcdNode(peerWithLowestRam.MasterContainer)
@@ -103,6 +114,8 @@ func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
 		return err
 	}
 	nodesConnInfo["mretcd"] = etcdNode
+	cc.MREtcdIds = append(cc.MREtcdIds, "mretcd")
+
 	// wg.Done()
 	// }()
 
@@ -116,6 +129,7 @@ func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
 	for i := range fsVolumeNodes {
 		volumeName := "fsvolume" + strconv.Itoa(i)
 		nodesConnInfo[volumeName] = fsVolumeNodes[i]
+		cc.FSVolumeIds = append(cc.FSVolumeIds, volumeName)
 	}
 	// wg.Done()
 	// }()
@@ -128,6 +142,8 @@ func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
 		return err
 	}
 	nodesConnInfo["fsfiler"] = fsFilerNode
+	cc.FSFilerIds = append(cc.FSFilerIds, "fsfiler")
+
 	// wg.Done()
 	// }()
 
