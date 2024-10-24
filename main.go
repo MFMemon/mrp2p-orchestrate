@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	// "github.com/golang/glog"
@@ -22,6 +23,9 @@ var (
 	mrReduceOutDirName     = flag.String("o", "", "directory name of the final output files")
 	mrWorkerScaleFactor    = flag.Int("s", 4, "number of worker nodes required for mapreduce job")
 	mrNumOfOutFiles        = flag.Int("n", 2, "number of final output files to be created")
+	mrInputRemoteDir       = "mrInput"
+	mapFuncRemoteDir       = "mrMapFunc"
+	reduceFuncRemoteDir    = "mrReduceFunc"
 )
 
 func cleanUpDir(paths ...string) error {
@@ -97,30 +101,35 @@ func main() {
 
 	time.Sleep(time.Second * 60) // wait for file system to be initialized
 
-	err = deployments.FSUpload("mrInput", *mrInputLocalDir)
+	_, err = deployments.FSUpload(mrInputRemoteDir, *mrInputLocalDir)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	err = deployments.FSUpload("mrMapFunc", *mrMapScriptLocalDir)
+	mapFuncPath, err := deployments.FSUpload(mapFuncRemoteDir, *mrMapScriptLocalDir)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	err = deployments.FSUpload("mrReduceFunc", *mrReduceScriptLocalDir)
+	reduceFuncPath, err := deployments.FSUpload(reduceFuncRemoteDir, *mrReduceScriptLocalDir)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	b, err := deployments.MarshalClusterConfig()
+	filepath.Join()
+
+	err = deployments.MRNodesCreate(
+		peers, peerWithLowestRam, *mrNumOfOutFiles,
+		mrInputRemoteDir,
+		filepath.Join(mapFuncRemoteDir, mapFuncPath[0]),
+		filepath.Join(reduceFuncRemoteDir, reduceFuncPath[0]),
+		"",
+		*mrReduceOutDirName,
+	)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	err = os.WriteFile("/tmp/cc.json", b, 0777)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-	utils.Logger().Infof("cc.json written successfully")
+	utils.Logger().Infof("Cluster deployed sucessfully.")
 
 }

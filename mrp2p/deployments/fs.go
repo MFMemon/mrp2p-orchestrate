@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 
@@ -35,9 +36,10 @@ type ClusterConfig struct {
 var (
 	nodesConnInfo DeployedNodes = make(DeployedNodes)
 	cc            ClusterConfig
+	ccPath        = "/tmp/cc.json"
 )
 
-func MarshalClusterConfig() ([]byte, error) {
+func marshalClusterConfig() ([]byte, error) {
 	// cc := ClusterConfig{
 	// 	MRWorkerIds:      []string{"mrworker1", "mrworker2"},
 	// 	MREtcdId:         []string{"mretcd"},
@@ -51,14 +53,17 @@ func MarshalClusterConfig() ([]byte, error) {
 	return file, err
 }
 
-func FSUpload(fsDir string, localDir string) error {
+func FSUpload(fsDir string, localDir string) ([]string, error) {
+
+	paths := make([]string, 0)
+
 	fsFilerAddr := net.JoinHostPort(nodesConnInfo["fsfiler"].Ip, nodesConnInfo["fsfiler"].Httpport.HostPort)
 	fsFilerUrl := fmt.Sprintf("http://%v/%v/", fsFilerAddr, fsDir)
 	cli := http.Client{}
 
 	err := filepath.WalkDir(localDir, func(path string, d fs.DirEntry, err error) error {
 
-		fmt.Println(path)
+		// fmt.Println(path)
 		if d.IsDir() {
 			return nil
 		}
@@ -72,21 +77,48 @@ func FSUpload(fsDir string, localDir string) error {
 
 		utils.Logger().Infof("File upload succes: %v", string(respBytes))
 
+		_, p := filepath.Split(path)
+		paths = append(paths, p)
+
 		return nil
 	})
 
 	if err != nil {
+		return nil, err
+	}
+
+	return paths, nil
+}
+
+func MRNodesCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer, numOfOutFiles int, filepaths ...string) error {
+
+	mrWorkerNode, err := startMRWorkers(peers, numOfOutFiles, filepaths...)
+	if err != nil {
 		return err
 	}
 
-	// for i := range paths {
-	// 	_, err := http.PostForm(postUrl, url.Values{
-	// 		"filename": {paths[i]},
-	// 	})
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
+	for i := range mrWorkerNode {
+		workerNodeName := "mrworker" + strconv.Itoa(i)
+		nodesConnInfo[workerNodeName] = mrWorkerNode[i]
+		cc.MRWorkerIds = append(cc.MRWorkerIds, workerNodeName)
+	}
+
+	b, err := marshalClusterConfig()
+	if err != nil {
+		utils.Logger().Fatal(err.Error())
+	}
+
+	err = os.WriteFile(ccPath, b, 0777)
+	if err != nil {
+		utils.Logger().Fatal(err.Error())
+	}
+	utils.Logger().Infof("cluster configuration file written successfully")
+
+	mrMasterNode, err := startMRMaster(peerWithLowestRam.MasterContainer, numOfOutFiles, ccPath, filepaths[0])
+	if err != nil {
+		return err
+	}
+	nodesConnInfo["mrmaster"] = mrMasterNode
 
 	return nil
 }
@@ -327,6 +359,110 @@ func startFsFilerNode(con *vms.ContainerInfo, fsMasterConnInfo *NodeConnInfo) (*
 	}
 
 	utils.Logger().Infof("File system filer server started at %v",
+		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Httpport.HostPort),
+	)
+
+	return nodeConn, nil
+}
+
+func startMRWorkers(
+	connectedPeers []*vms.Peer, numOfOutputFiles int, filePaths ...string) ([]*NodeConnInfo, error) {
+
+	var workerNodes []*NodeConnInfo
+
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pmrworker")
+
+	if err != nil {
+		utils.Logger().Infof(err.Error())
+	}
+
+	for i, _ := range connectedPeers {
+		peer := connectedPeers[i]
+		for j, _ := range peer.OtherContainers {
+			con := peer.OtherContainers[j]
+			for k := range []int{1, 2} {
+				node, err := startMRWorker(con, k, numOfOutputFiles, plugin, filePaths...)
+				if err != nil {
+					return nil, err
+				}
+				workerNodes = append(workerNodes, node)
+			}
+
+		}
+	}
+	return workerNodes, nil
+}
+
+func startMRWorker(con *vms.ContainerInfo, id int, numOfOutputFiles int, plugin string, filepaths ...string) (*NodeConnInfo, error) {
+	var requiredPort *vms.Port
+
+	for i, _ := range con.Ports {
+		if con.Ports[i].Name == "AutoGen Port" && !con.Ports[i].Taken {
+			requiredPort = con.Ports[i]
+			con.Ports[i].Taken = true
+			break
+		}
+	}
+
+	nodeConn := new(NodeConnInfo)
+	nodeConn.ContainerId = con.Id
+	nodeConn.Ip = con.Ip
+	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
+	nodeConn.Httpport.HostPort = requiredPort.HostPort
+
+	fsFilerNode := nodesConnInfo[cc.FSFilerIds[0]]
+
+	pluginArgs := []string{strconv.Itoa(id), nodeConn.Httpport.ContainerPort,
+		fmt.Sprintf("%v:%v", fsFilerNode.Ip, fsFilerNode.Httpport.HostPort),
+		nodeConn.ContainerId,
+		filepaths[1],
+		filepaths[2],
+		strconv.Itoa(numOfOutputFiles),
+		filepaths[4],
+	}
+
+	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	if err != nil {
+		return nil, err
+	}
+
+	utils.Logger().Infof("Mapreduce worker node started at %v",
+		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Httpport.HostPort),
+	)
+
+	return nodeConn, nil
+}
+
+func startMRMaster(con *vms.ContainerInfo, numOfReducers int, cconf string, inputDir string) (*NodeConnInfo, error) {
+	var requiredPort *vms.Port
+
+	for i := range con.Ports {
+		if con.Ports[i].Name == "AutoGen Port" && !con.Ports[i].Taken {
+			requiredPort = con.Ports[i]
+			con.Ports[i].Taken = true
+			break
+		}
+	}
+
+	nodeConn := new(NodeConnInfo)
+	nodeConn.ContainerId = con.Id
+	nodeConn.Ip = con.Ip
+	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
+	nodeConn.Httpport.HostPort = requiredPort.HostPort
+
+	pluginArgs := []string{nodeConn.Httpport.ContainerPort, cconf, strconv.Itoa(numOfReducers)}
+
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pmrmaster")
+	if err != nil {
+		return nil, err
+	}
+
+	err = abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	if err != nil {
+		return nil, err
+	}
+
+	utils.Logger().Infof("Mapreduce master node started at %v",
 		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Httpport.HostPort),
 	)
 
