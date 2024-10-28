@@ -98,7 +98,7 @@ func MRNodesCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer, numOfOutFiles
 	}
 
 	for i := range mrWorkerNode {
-		workerNodeName := "mrworker" + strconv.Itoa(i)
+		workerNodeName := "mrworker_" + mrWorkerNode[i].Httpport.ContainerPort + strconv.Itoa(i)
 		nodesConnInfo[workerNodeName] = mrWorkerNode[i]
 		cc.MRWorkerIds = append(cc.MRWorkerIds, workerNodeName)
 	}
@@ -450,7 +450,7 @@ func startMRMaster(con *vms.ContainerInfo, numOfReducers int, cconf string, inpu
 	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
 	nodeConn.Httpport.HostPort = requiredPort.HostPort
 
-	pluginArgs := []string{nodeConn.Httpport.ContainerPort, cconf, strconv.Itoa(numOfReducers)}
+	pluginArgs := []string{nodeConn.Httpport.ContainerPort, inputDir, cconf, strconv.Itoa(numOfReducers)}
 
 	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pmrmaster")
 	if err != nil {
