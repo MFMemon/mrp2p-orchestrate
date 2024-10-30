@@ -139,23 +139,17 @@ func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
 	cc.FSMasterIds = append(cc.FSMasterIds, "fsmaster")
 
 	// go func() {
-	etcdNode, err := startEtcdNode(peerWithLowestRam.MasterContainer)
+	_, err = startEtcdNode(peerWithLowestRam.MasterContainer)
 	if err != nil {
 		// errChan <- err
 		// wg.Done()
 		return err
 	}
-	nodesConnInfo["mretcd"] = etcdNode
-	cc.MREtcdIds = append(cc.MREtcdIds, "mretcd")
+	// nodesConnInfo["mretcd"] = etcdNode
+	// cc.MREtcdIds = append(cc.MREtcdIds, "mretcd")
 
-	// wg.Done()
-	// }()
-
-	// go func() {
 	fsVolumeNodes, err := startFsVolumeNodes(peers, nodesConnInfo["fsmaster"])
 	if err != nil {
-		// errChan <- err
-		// wg.Done()
 		return err
 	}
 	for i := range fsVolumeNodes {
@@ -163,27 +157,13 @@ func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
 		nodesConnInfo[volumeName] = fsVolumeNodes[i]
 		cc.FSVolumeIds = append(cc.FSVolumeIds, volumeName)
 	}
-	// wg.Done()
-	// }()
 
-	// go func() {
 	fsFilerNode, err := startFsFilerNode(peerWithLowestRam.MasterContainer, nodesConnInfo["fsmaster"])
 	if err != nil {
-		// errChan <- err
-		// wg.Done()
 		return err
 	}
 	nodesConnInfo["fsfiler"] = fsFilerNode
 	cc.FSFilerIds = append(cc.FSFilerIds, "fsfiler")
-
-	// wg.Done()
-	// }()
-
-	// wg.Wait()
-
-	// if len(errChan) > 0 {
-	// 	return <-errChan
-	// }
 
 	return nil
 }
