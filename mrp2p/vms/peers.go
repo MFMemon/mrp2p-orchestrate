@@ -36,7 +36,7 @@ func UpdateAvailablePeers() ([]*Peer, error) {
 
 	for i, _ := range availablePeerNodes.IpAddress {
 		node := availablePeerNodes.IpAddress[i]
-		if node.EscapeImplementation == "FRP" {
+		if node.EscapeImplementation == "FRP" && node.Name != "vmi1594197.contaboserver.net-XJBM4GO" {
 			peerSpec, _ := abs.GetSpecs(node.Ipv4 + ":" + node.ServerPort)
 			peer := Peer{
 				Name: node.Name,
