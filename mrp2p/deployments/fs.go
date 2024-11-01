@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	abs "github.com/Akilan1999/p2p-rendering-computation/abstractions"
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/utils"
@@ -26,6 +27,7 @@ type NodeConnInfo struct {
 
 type ClusterConfig struct {
 	MRWorkerIds      []string      `json:"MRWorkerIds"`
+	MRMasterIds      []string      `json:"MRMasterIds"`
 	MREtcdIds        []string      `json:"MREtcdIds"`
 	FSMasterIds      []string      `json:"FSMasterIds"`
 	FSVolumeIds      []string      `json:"FSVolumeIds"`
@@ -34,8 +36,8 @@ type ClusterConfig struct {
 }
 
 var (
-	nodesConnInfo DeployedNodes = make(DeployedNodes)
-	cc            ClusterConfig
+	NodesConnInfo DeployedNodes = make(DeployedNodes)
+	CC            ClusterConfig
 	ccPath        = "/tmp/cc.json"
 )
 
@@ -45,11 +47,11 @@ func marshalClusterConfig() ([]byte, error) {
 	// 	MREtcdId:         []string{"mretcd"},
 	// 	MRP2PClusterInfo: nodesConnInfo,
 	// }
-	cc.MRWorkerIds = append(cc.MRWorkerIds, "mrworker1")
-	cc.MRWorkerIds = append(cc.MRWorkerIds, "mrworker2")
-	cc.MRP2PClusterInfo = nodesConnInfo
+	CC.MRWorkerIds = append(CC.MRWorkerIds, "mrworker1")
+	CC.MRWorkerIds = append(CC.MRWorkerIds, "mrworker2")
+	CC.MRP2PClusterInfo = NodesConnInfo
 
-	file, err := json.MarshalIndent(cc, "", "\t")
+	file, err := json.MarshalIndent(CC, "", "\t")
 	return file, err
 }
 
@@ -57,7 +59,7 @@ func FSUpload(fsDir string, localDir string) ([]string, error) {
 
 	paths := make([]string, 0)
 
-	fsFilerAddr := net.JoinHostPort(nodesConnInfo["fsfiler"].Ip, nodesConnInfo["fsfiler"].Httpport.HostPort)
+	fsFilerAddr := net.JoinHostPort(NodesConnInfo["fsfiler0"].Ip, NodesConnInfo["fsfiler0"].Httpport.HostPort)
 	fsFilerUrl := fmt.Sprintf("http://%v/%v/", fsFilerAddr, fsDir)
 	cli := http.Client{}
 
@@ -90,17 +92,17 @@ func FSUpload(fsDir string, localDir string) ([]string, error) {
 	return paths, nil
 }
 
-func MRNodesCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer, numOfOutFiles int, filepaths ...string) error {
+func MRNodesCreate(peers []*vms.Peer, numOfOutFiles int, filepaths ...string) error {
 
-	mrWorkerNode, err := startMRWorkers(peers, numOfOutFiles, filepaths...)
+	mrWorkerNodes, err := startMRWorkers(peers, numOfOutFiles, filepaths...)
 	if err != nil {
 		return err
 	}
 
-	for i := range mrWorkerNode {
-		workerNodeName := "mrworker_" + mrWorkerNode[i].Httpport.ContainerPort + strconv.Itoa(i)
-		nodesConnInfo[workerNodeName] = mrWorkerNode[i]
-		cc.MRWorkerIds = append(cc.MRWorkerIds, workerNodeName)
+	for i := range mrWorkerNodes {
+		workerNodeName := "mrworker_" + mrWorkerNodes[i].Httpport.ContainerPort + strconv.Itoa(i)
+		NodesConnInfo[workerNodeName] = mrWorkerNodes[i]
+		CC.MRWorkerIds = append(CC.MRWorkerIds, workerNodeName)
 	}
 
 	b, err := marshalClusterConfig()
@@ -114,90 +116,169 @@ func MRNodesCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer, numOfOutFiles
 	}
 	utils.Logger().Infof("cluster configuration file written successfully")
 
-	mrMasterNode, err := startMRMaster(peerWithLowestRam.MasterContainer, numOfOutFiles, ccPath, filepaths[0])
+	mrMasterNodes, err := startMRMasters(peers, numOfOutFiles, ccPath, filepaths[0])
 	if err != nil {
 		return err
 	}
-	nodesConnInfo["mrmaster"] = mrMasterNode
+
+	for i := range mrMasterNodes {
+		masterNodeName := "mrmaster" + strconv.Itoa(i)
+		NodesConnInfo[masterNodeName] = mrMasterNodes[i]
+		CC.MRMasterIds = append(CC.MRMasterIds, masterNodeName)
+	}
+
+	// mrMasterNode, err := startMRMaster(peerWithLowestRam.MasterContainer, numOfOutFiles, ccPath, filepaths[0])
+	// if err != nil {
+	// 	return err
+	// }
+	// nodesConnInfo["mrmaster"] = mrMasterNode
 
 	return nil
 }
 
-func FSCreate(peers []*vms.Peer, peerWithLowestRam *vms.Peer) error {
+func FSCreate(peers []*vms.Peer) error {
 
-	// wg := new(sync.WaitGroup)
-	// wg.Add(3)
-
-	// errChan := make(chan error, 3)
-	// defer close(errChan)
-
-	fsMasterNode, err := startFsMasterNode(peerWithLowestRam.MasterContainer)
+	fsMasterNodes, err := startFsMasterNodes(peers)
 	if err != nil {
 		return err
 	}
-	nodesConnInfo["fsmaster"] = fsMasterNode
-	cc.FSMasterIds = append(cc.FSMasterIds, "fsmaster")
-
-	// go func() {
-	_, err = startEtcdNode(peerWithLowestRam.MasterContainer)
-	if err != nil {
-		// errChan <- err
-		// wg.Done()
-		return err
+	for i := range fsMasterNodes {
+		masterName := "fsmaster" + strconv.Itoa(i)
+		NodesConnInfo[masterName] = fsMasterNodes[i]
+		CC.FSMasterIds = append(CC.FSMasterIds, masterName)
 	}
-	// nodesConnInfo["mretcd"] = etcdNode
-	// cc.MREtcdIds = append(cc.MREtcdIds, "mretcd")
 
-	fsVolumeNodes, err := startFsVolumeNodes(peers, nodesConnInfo["fsmaster"])
+	fsVolumeNodes, err := startFsVolumeNodes(peers, CC.FSMasterIds)
 	if err != nil {
 		return err
 	}
 	for i := range fsVolumeNodes {
 		volumeName := "fsvolume" + strconv.Itoa(i)
-		nodesConnInfo[volumeName] = fsVolumeNodes[i]
-		cc.FSVolumeIds = append(cc.FSVolumeIds, volumeName)
+		NodesConnInfo[volumeName] = fsVolumeNodes[i]
+		CC.FSVolumeIds = append(CC.FSVolumeIds, volumeName)
 	}
 
-	fsFilerNode, err := startFsFilerNode(peerWithLowestRam.MasterContainer, nodesConnInfo["fsmaster"])
+	fsFilerNodes, err := startFsFilerNodes(peers, CC.FSMasterIds)
 	if err != nil {
 		return err
 	}
-	nodesConnInfo["fsfiler"] = fsFilerNode
-	cc.FSFilerIds = append(cc.FSFilerIds, "fsfiler")
+	for i := range fsFilerNodes {
+		filerName := "fsfiler" + strconv.Itoa(i)
+		NodesConnInfo[filerName] = fsFilerNodes[i]
+		CC.FSFilerIds = append(CC.FSFilerIds, filerName)
+	}
+
+	mrEtcdNodes, err := startMrEtcdNodes(peers)
+	if err != nil {
+		return err
+	}
+	for i := range mrEtcdNodes {
+		etcdNodeName := "mretcd" + strconv.Itoa(i)
+		NodesConnInfo[etcdNodeName] = mrEtcdNodes[i]
+		CC.MREtcdIds = append(CC.MREtcdIds, etcdNodeName)
+	}
 
 	return nil
 }
 
-func startFsMasterNode(con *vms.ContainerInfo) (*NodeConnInfo, error) {
-	// err := abs.Pul
-	requiredPorts := make([]*vms.Port, 0)
+func startFsMasterNodes(connectedPeers []*vms.Peer) ([]*NodeConnInfo, error) {
 
-	for i := range con.Ports {
-		if con.Ports[i].Name == "AutoGen Port" {
-			requiredPorts = append(requiredPorts, con.Ports[i])
-			con.Ports[i].Taken = true
-		}
-		if len(requiredPorts) == 2 {
-			break
+	var masterNodes []*NodeConnInfo
+
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsmaster")
+
+	if err != nil {
+		utils.Logger().Infof(err.Error())
+	}
+
+	fsMasterPeerPorts := make([][]*vms.Port, 0)
+	fsMasterPeerIps := make([]string, 0)
+
+	for i, _ := range connectedPeers {
+		peer := connectedPeers[i]
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
+			conFSMasterPorts := make([]*vms.Port, 0)
+
+			for k := range con.Ports {
+				if con.Ports[k].Name == "FSMasterGrpcPort" || con.Ports[k].Name == "FSMasterHttpPort" {
+					conFSMasterPorts = append(conFSMasterPorts, con.Ports[k])
+				}
+			}
+
+			fsMasterPeerPorts = append(
+				fsMasterPeerPorts,
+				conFSMasterPorts,
+			)
+
+			fsMasterPeerIps = append(fsMasterPeerIps, con.Ip)
 		}
 	}
+
+	for i, _ := range connectedPeers {
+		peer := connectedPeers[i]
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
+			thisPeerAddrIdx := i*len(peer.Containers) + j
+
+			targetNodePorts := fsMasterPeerPorts[thisPeerAddrIdx]
+
+			targetNodePeerPorts := make([][]*vms.Port, 0)
+			targetNodePeerPorts = append(targetNodePeerPorts, fsMasterPeerPorts[0:thisPeerAddrIdx]...)
+			targetNodePeerPorts = append(targetNodePeerPorts, fsMasterPeerPorts[thisPeerAddrIdx+1:]...)
+
+			targetNodePeerIps := make([]string, 0)
+			targetNodePeerIps = append(targetNodePeerIps, fsMasterPeerIps[0:thisPeerAddrIdx]...)
+			targetNodePeerIps = append(targetNodePeerIps, fsMasterPeerIps[thisPeerAddrIdx+1:]...)
+
+			node, err := startFsMasterNode(con, plugin, targetNodePorts, targetNodePeerPorts, targetNodePeerIps)
+			if err != nil {
+				return nil, err
+			}
+
+			masterNodes = append(masterNodes, node)
+		}
+	}
+	return masterNodes, nil
+}
+
+func startFsMasterNode(con *vms.ContainerInfo, plugin string, requiredPorts []*vms.Port,
+	peerPorts [][]*vms.Port, peerIps []string) (*NodeConnInfo, error) {
 
 	nodeConn := new(NodeConnInfo)
 	nodeConn.ContainerId = con.Id
 	nodeConn.Ip = con.Ip
 
-	nodeConn.Grpcport.ContainerPort = requiredPorts[0].ContainerPort
-	nodeConn.Grpcport.HostPort = requiredPorts[0].HostPort
-	nodeConn.Httpport.ContainerPort = requiredPorts[1].ContainerPort
-	nodeConn.Httpport.HostPort = requiredPorts[1].HostPort
-
-	pluginArgs := []string{nodeConn.Grpcport.ContainerPort, nodeConn.Httpport.ContainerPort}
-	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsmaster")
-	if err != nil {
-		return nil, err
+	for i := range requiredPorts {
+		port := requiredPorts[i]
+		if port.Name == "FSMasterGrpcPort" {
+			nodeConn.Grpcport.ContainerPort = port.ContainerPort
+			nodeConn.Grpcport.HostPort = port.HostPort
+		} else {
+			nodeConn.Httpport.ContainerPort = port.ContainerPort
+			nodeConn.Httpport.HostPort = port.HostPort
+		}
 	}
 
-	err = abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	peerAddrs := make([]string, 0)
+
+	for i := range peerPorts {
+		for j := range peerPorts[i] {
+			peerPort := peerPorts[i][j]
+			if peerPort.Name == "FSMasterGrpcPort" {
+				peerHostPort, _ := strconv.Atoi(peerPort.HostPort)
+				peerAddrs = append(
+					peerAddrs,
+					fmt.Sprintf("%v:%v", peerIps[i], peerHostPort-10000),
+				)
+				break
+			}
+		}
+	}
+
+	pluginArgs := []string{strings.Join(peerAddrs, ",")}
+
+	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -210,42 +291,7 @@ func startFsMasterNode(con *vms.ContainerInfo) (*NodeConnInfo, error) {
 	return nodeConn, nil
 }
 
-func startEtcdNode(con *vms.ContainerInfo) (*NodeConnInfo, error) {
-	// err := abs.Pul
-	var requiredPort *vms.Port
-
-	for i, _ := range con.Ports {
-		if con.Ports[i].Name == "EtcdPort" {
-			requiredPort = con.Ports[i]
-			con.Ports[i].Taken = true
-			break
-		}
-	}
-
-	nodeConn := new(NodeConnInfo)
-	nodeConn.ContainerId = con.Id
-	nodeConn.Ip = con.Ip
-	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
-	nodeConn.Httpport.HostPort = requiredPort.HostPort
-
-	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2petcd")
-	if err != nil {
-		return nil, err
-	}
-
-	err = abs.ExecutePlugin(plugin, con.Id, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	utils.Logger().Infof("etcd server started at %v",
-		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Httpport.HostPort),
-	)
-
-	return nodeConn, nil
-}
-
-func startFsVolumeNodes(connectedPeers []*vms.Peer, fsMasterConnInfo *NodeConnInfo) ([]*NodeConnInfo, error) {
+func startFsVolumeNodes(connectedPeers []*vms.Peer, fsMasterPeerNames []string) ([]*NodeConnInfo, error) {
 	// err := abs.Pul
 	var volumeNodes []*NodeConnInfo
 
@@ -257,9 +303,9 @@ func startFsVolumeNodes(connectedPeers []*vms.Peer, fsMasterConnInfo *NodeConnIn
 
 	for i, _ := range connectedPeers {
 		peer := connectedPeers[i]
-		for j, _ := range peer.OtherContainers {
-			con := peer.OtherContainers[j]
-			node, err := startFsVolumeNode(con, fsMasterConnInfo, plugin)
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
+			node, err := startFsVolumeNode(con, fsMasterPeerNames, plugin)
 			if err != nil {
 				return nil, err
 			}
@@ -270,7 +316,9 @@ func startFsVolumeNodes(connectedPeers []*vms.Peer, fsMasterConnInfo *NodeConnIn
 	return volumeNodes, nil
 }
 
-func startFsVolumeNode(con *vms.ContainerInfo, fsMasterConnInfo *NodeConnInfo, plugin string) (*NodeConnInfo, error) {
+func startFsVolumeNode(con *vms.ContainerInfo, fsMasterPeerNames []string,
+	plugin string) (*NodeConnInfo, error) {
+
 	var requiredPort *vms.Port
 
 	for i, _ := range con.Ports {
@@ -287,11 +335,20 @@ func startFsVolumeNode(con *vms.ContainerInfo, fsMasterConnInfo *NodeConnInfo, p
 	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
 	nodeConn.Httpport.HostPort = requiredPort.HostPort
 
-	fsMasterIp := fsMasterConnInfo.Ip
-	fsMasterPort, _ := strconv.Atoi(fsMasterConnInfo.Grpcport.HostPort)
+	fsMasterPeerAddrs := make([]string, 0)
 
-	pluginArgs := []string{nodeConn.Httpport.ContainerPort,
-		fmt.Sprintf("%v:%v", fsMasterIp, fsMasterPort-10000)}
+	for i := range fsMasterPeerNames {
+		masterName := fsMasterPeerNames[i]
+		masterIp := NodesConnInfo[masterName].Ip
+		masterPort, _ := strconv.Atoi(NodesConnInfo[masterName].Grpcport.HostPort)
+
+		fsMasterPeerAddrs = append(
+			fsMasterPeerAddrs,
+			fmt.Sprintf("%v:%v", masterIp, masterPort-10000),
+		)
+	}
+
+	pluginArgs := []string{nodeConn.Httpport.ContainerPort, strings.Join(fsMasterPeerAddrs, ",")}
 
 	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
 	if err != nil {
@@ -305,7 +362,32 @@ func startFsVolumeNode(con *vms.ContainerInfo, fsMasterConnInfo *NodeConnInfo, p
 	return nodeConn, nil
 }
 
-func startFsFilerNode(con *vms.ContainerInfo, fsMasterConnInfo *NodeConnInfo) (*NodeConnInfo, error) {
+func startFsFilerNodes(connectedPeers []*vms.Peer, fsMasterPeerNames []string) ([]*NodeConnInfo, error) {
+	// err := abs.Pul
+	var filerNodes []*NodeConnInfo
+
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsfiler")
+
+	if err != nil {
+		utils.Logger().Infof(err.Error())
+	}
+
+	for i, _ := range connectedPeers {
+		peer := connectedPeers[i]
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
+			node, err := startFsFilerNode(con, fsMasterPeerNames, plugin)
+			if err != nil {
+				return nil, err
+			}
+
+			filerNodes = append(filerNodes, node)
+		}
+	}
+	return filerNodes, nil
+}
+
+func startFsFilerNode(con *vms.ContainerInfo, fsMasterPeerNames []string, plugin string) (*NodeConnInfo, error) {
 	var requiredPort *vms.Port
 
 	for i := range con.Ports {
@@ -322,23 +404,128 @@ func startFsFilerNode(con *vms.ContainerInfo, fsMasterConnInfo *NodeConnInfo) (*
 	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
 	nodeConn.Httpport.HostPort = requiredPort.HostPort
 
-	fsMasterIp := fsMasterConnInfo.Ip
-	fsMasterPort, _ := strconv.Atoi(fsMasterConnInfo.Grpcport.HostPort)
+	fsMasterPeerAddrs := make([]string, 0)
 
-	pluginArgs := []string{nodeConn.Httpport.ContainerPort,
-		fmt.Sprintf("%v:%v", fsMasterIp, fsMasterPort-10000)}
+	for i := range fsMasterPeerNames {
+		masterName := fsMasterPeerNames[i]
+		masterIp := NodesConnInfo[masterName].Ip
+		masterPort, _ := strconv.Atoi(NodesConnInfo[masterName].Grpcport.HostPort)
 
-	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsfiler")
-	if err != nil {
-		return nil, err
+		fsMasterPeerAddrs = append(
+			fsMasterPeerAddrs,
+			fmt.Sprintf("%v:%v", masterIp, masterPort-10000),
+		)
 	}
 
-	err = abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	pluginArgs := []string{nodeConn.Httpport.ContainerPort, strings.Join(fsMasterPeerAddrs, ",")}
+
+	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
 	if err != nil {
 		return nil, err
 	}
 
 	utils.Logger().Infof("File system filer server started at %v",
+		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Httpport.HostPort),
+	)
+
+	return nodeConn, nil
+}
+
+func startMrEtcdNodes(connectedPeers []*vms.Peer) ([]*NodeConnInfo, error) {
+
+	var etcdNodes []*NodeConnInfo
+
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2petcd")
+
+	if err != nil {
+		utils.Logger().Infof(err.Error())
+	}
+
+	etcdPeers := make([]string, 0)
+	etcdClients := make([]string, 0)
+
+	for i, _ := range connectedPeers {
+		peer := connectedPeers[i]
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
+
+			for k := range con.Ports {
+				if con.Ports[k].Name == "EtcdServerPort" {
+					name := "etcdNode" + strconv.Itoa(i) + strconv.Itoa(j)
+					ip := con.Ip
+					port := con.Ports[k].HostPort
+					etcdPeers = append(
+						etcdPeers,
+						fmt.Sprintf("%v=http://%v:%v", name, ip, port),
+					)
+				}
+				if con.Ports[k].Name == "EtcdClientPort" {
+					ip := con.Ip
+					port := con.Ports[k].HostPort
+					etcdClients = append(
+						etcdClients,
+						fmt.Sprintf("http://%v:%v", ip, port),
+					)
+				}
+			}
+		}
+	}
+
+	for i, _ := range connectedPeers {
+		peer := connectedPeers[i]
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
+
+			node, err := startMrEtcdNode(
+				con, plugin, etcdPeers,
+				etcdPeers[i*len(peer.Containers)+j],
+				etcdClients[i*len(peer.Containers)+j],
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			etcdNodes = append(etcdNodes, node)
+		}
+	}
+	return etcdNodes, nil
+}
+
+func startMrEtcdNode(con *vms.ContainerInfo, plugin string,
+	peerNamesAndAdvertiseUrls []string, peerNameAndAdvertiseUrl string, clientAdvertiseUrl string) (*NodeConnInfo, error) {
+
+	var requiredPort *vms.Port
+
+	clientLocalListenIp := "127.0.0.1"
+
+	for i, _ := range con.Ports {
+		if con.Ports[i].Name == "EtcdClientPort" {
+			requiredPort = con.Ports[i]
+			con.Ports[i].Taken = true
+			break
+		}
+	}
+
+	nodeConn := new(NodeConnInfo)
+	nodeConn.ContainerId = con.Id
+	nodeConn.Ip = clientLocalListenIp
+	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
+	nodeConn.Httpport.HostPort = requiredPort.HostPort
+
+	peerName := strings.Split(peerNameAndAdvertiseUrl, "=")[0]
+	peerAdvertiseUrl := strings.Split(peerNameAndAdvertiseUrl, "=")[1]
+
+	pluginArgs := []string{
+		peerName, peerAdvertiseUrl, clientLocalListenIp,
+		clientAdvertiseUrl, strings.Join(peerNamesAndAdvertiseUrls, ","),
+	}
+
+	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	if err != nil {
+		return nil, err
+	}
+
+	utils.Logger().Infof("etcd client started at %v",
 		fmt.Sprintf("%v:%v", nodeConn.Ip, nodeConn.Httpport.HostPort),
 	)
 
@@ -358,8 +545,8 @@ func startMRWorkers(
 
 	for i, _ := range connectedPeers {
 		peer := connectedPeers[i]
-		for j, _ := range peer.OtherContainers {
-			con := peer.OtherContainers[j]
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
 			for k := range []int{1, 2} {
 				node, err := startMRWorker(con, k, numOfOutputFiles, plugin, filePaths...)
 				if err != nil {
@@ -390,7 +577,7 @@ func startMRWorker(con *vms.ContainerInfo, id int, numOfOutputFiles int, plugin 
 	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
 	nodeConn.Httpport.HostPort = requiredPort.HostPort
 
-	fsFilerNode := nodesConnInfo[cc.FSFilerIds[0]]
+	fsFilerNode := NodesConnInfo[CC.FSFilerIds[0]]
 
 	pluginArgs := []string{strconv.Itoa(id), nodeConn.Httpport.ContainerPort,
 		fmt.Sprintf("%v:%v", fsFilerNode.Ip, fsFilerNode.Httpport.HostPort),
@@ -413,7 +600,40 @@ func startMRWorker(con *vms.ContainerInfo, id int, numOfOutputFiles int, plugin 
 	return nodeConn, nil
 }
 
-func startMRMaster(con *vms.ContainerInfo, numOfReducers int, cconf string, inputDir string) (*NodeConnInfo, error) {
+func startMRMasters(
+	connectedPeers []*vms.Peer, numOfOutputFiles int, cconf string, inputDir string) ([]*NodeConnInfo, error) {
+
+	var masterNodes []*NodeConnInfo
+
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pmrmaster")
+
+	if err != nil {
+		utils.Logger().Infof(err.Error())
+		return nil, err
+	}
+
+	for i, _ := range connectedPeers {
+		peer := connectedPeers[i]
+		for j, _ := range peer.Containers {
+			con := peer.Containers[j]
+			node, err := startMRMaster(
+				con, plugin, CC.MREtcdIds[i*len(peer.Containers)+j],
+				numOfOutputFiles, cconf, inputDir, strconv.Itoa(i*len(peer.Containers)+j),
+			)
+
+			if err != nil {
+				return nil, err
+			}
+			masterNodes = append(masterNodes, node)
+
+		}
+	}
+	return masterNodes, nil
+}
+
+func startMRMaster(con *vms.ContainerInfo, plugin string, etcdNodeName string, numOfReducers int,
+	cconf string, inputDir string, id string) (*NodeConnInfo, error) {
+
 	var requiredPort *vms.Port
 
 	for i := range con.Ports {
@@ -430,14 +650,16 @@ func startMRMaster(con *vms.ContainerInfo, numOfReducers int, cconf string, inpu
 	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
 	nodeConn.Httpport.HostPort = requiredPort.HostPort
 
-	pluginArgs := []string{nodeConn.Httpport.ContainerPort, inputDir, cconf, strconv.Itoa(numOfReducers)}
-
-	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pmrmaster")
-	if err != nil {
-		return nil, err
+	pluginArgs := []string{
+		nodeConn.Httpport.ContainerPort, inputDir, cconf, strconv.Itoa(numOfReducers),
+		fmt.Sprintf(
+			"http://%v:%v", NodesConnInfo[etcdNodeName].Ip,
+			NodesConnInfo[etcdNodeName].Httpport.ContainerPort,
+		),
+		id,
 	}
 
-	err = abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
 	if err != nil {
 		return nil, err
 	}

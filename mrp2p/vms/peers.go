@@ -8,12 +8,11 @@ import (
 )
 
 type Peer struct {
-	Name            string
-	Ip              string
-	Port            string
-	MasterContainer *ContainerInfo
-	OtherContainers []*ContainerInfo
-	Resources       Specs
+	Name       string
+	Ip         string
+	Port       string
+	Containers []*ContainerInfo
+	Resources  Specs
 }
 
 type Specs struct {

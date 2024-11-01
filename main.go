@@ -11,6 +11,7 @@ import (
 
 	abs "github.com/Akilan1999/p2p-rendering-computation/abstractions"
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/deployments"
+	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/mrjob"
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/utils"
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/vms"
 )
@@ -21,7 +22,6 @@ var (
 	mrMapScriptLocalDir    = flag.String("m", "", "absolute local path of the map function script for mapreduce job")
 	mrReduceScriptLocalDir = flag.String("r", "", "absolute local path of the reduce function script for mapreduce job")
 	mrReduceOutDirName     = flag.String("o", "", "directory name of the final output files")
-	mrWorkerScaleFactor    = flag.Int("s", 4, "number of worker nodes required for mapreduce job")
 	mrNumOfOutFiles        = flag.Int("n", 2, "number of final output files to be created")
 	mrInputRemoteDir       = "mrInput"
 	mapFuncRemoteDir       = "mrMapFunc"
@@ -62,9 +62,6 @@ func validateArgs() error {
 func main() {
 
 	flag.Parse()
-	// zaputils.Logger(), _ := zap.NewProduction()
-	// defer zaputils.Logger().Sync()
-	// utils.Logger() = zaputils.Logger().Sugar()
 
 	// err := validateArgs()
 	// if err != nil {
@@ -89,12 +86,12 @@ func main() {
 
 	utils.Logger().Infof("Total peers found in the network: %v", len(peers))
 
-	peerWithLowestRam, err := vms.SpinUpVms(peers, 3, *mrWorkerScaleFactor)
+	err = vms.SpinUpVms(peers)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	err = deployments.FSCreate(peers, peerWithLowestRam)
+	err = deployments.FSCreate(peers)
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
@@ -116,10 +113,8 @@ func main() {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	filepath.Join()
-
 	err = deployments.MRNodesCreate(
-		peers, peerWithLowestRam, *mrNumOfOutFiles,
+		peers, *mrNumOfOutFiles,
 		mrInputRemoteDir,
 		filepath.Join(mapFuncRemoteDir, mapFuncPath[0]),
 		filepath.Join(reduceFuncRemoteDir, reduceFuncPath[0]),
@@ -131,5 +126,12 @@ func main() {
 	}
 
 	utils.Logger().Infof("Cluster deployed sucessfully.")
+
+	err = mrjob.Start()
+	if err != nil {
+		utils.Logger().Fatal(err.Error())
+	}
+
+	utils.Logger().Infof("Job completed.")
 
 }

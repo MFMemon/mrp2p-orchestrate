@@ -21,10 +21,15 @@ type Port struct {
 	Taken         bool   `json:"-"`
 }
 
-func spinUpContainer(targetPeer *Peer, numOfFsPorts int, numOfMrPorts int, isMaster bool) error {
+const (
+	vmBaseName  = "mrp2p-docker"
+	vmBaseImage = "python:3.12"
+)
+
+func spinUpContainer(targetPeer *Peer, numOfFsPorts int, numOfMrPorts int) error {
 
 	targetPeerAddr := fmt.Sprintf("%v:%v", targetPeer.Ip, targetPeer.Port)
-	con, err := abs.StartContainer(targetPeerAddr, numOfFsPorts+numOfMrPorts, "mrp2p-docker", "python:3.12")
+	con, err := abs.StartContainer(targetPeerAddr, numOfFsPorts+numOfMrPorts, vmBaseName, vmBaseImage)
 	if err != nil {
 		return err
 	}
@@ -44,62 +49,34 @@ func spinUpContainer(targetPeer *Peer, numOfFsPorts int, numOfMrPorts int, isMas
 		})
 	}
 
-	if isMaster {
-		targetPeer.MasterContainer = &conInfo
-	} else {
-		targetPeer.OtherContainers = append(targetPeer.OtherContainers, &conInfo)
-	}
-
+	targetPeer.Containers = append(targetPeer.Containers, &conInfo)
 	utils.Logger().Infof("Started container at peer %s in p2prc network", targetPeer.Name)
 
 	return nil
 }
 
-func SpinUpVms(peers []*Peer, minimumContainersRequired int, mrWorkerScaleFactor int) (*Peer, error) {
+func SpinUpVms(peers []*Peer) error {
 
-	var peerWithLowestRam *Peer
-	var lowestAvailableRam uint64 = 98304.0 // 96 GB
+	// var lowestAvailableRam uint64 = 98304.0 // 96 GB
 
 	for i := range peers {
 		peer := peers[i]
-		if peer.Resources.Ram < lowestAvailableRam {
-			peerWithLowestRam = peers[i]
-			lowestAvailableRam = peer.Resources.Ram
+		err := spinUpContainer(peer, 4, 3) // spins up a container that will run file system master and mapreduce master
+		if err != nil {
+			return err
 		}
 		utils.Logger().Infof("Peer %v: %v", i, peer.Name)
-	}
 
-	totalContainersRunning := 0
+		err = spinUpContainer(peer, 4, 3) // spins up a container that will run file system master and mapreduce master
+		if err != nil {
+			return err
+		}
 
-	err := spinUpContainer(peerWithLowestRam, 3, 1, true) // spins up a container that will run file system master and mapreduce master
-	if err != nil {
-		return nil, err
-	}
-
-	totalContainersRunning += 1
-
-	for totalContainersRunning < minimumContainersRequired {
-
-		if len(peers) == 1 {
-			err = spinUpContainer(peers[0], 1, mrWorkerScaleFactor, false) // spins up a container that will run file system volume and mapreduce worker
-			if err != nil {
-				return nil, err
-			}
-
-			totalContainersRunning += 1
-
-		} else {
-
-			for i := range peers {
-				if peers[i].Name != peerWithLowestRam.Name {
-					err = spinUpContainer(peers[i], 1, mrWorkerScaleFactor, false) // spins up a container that will run file system volume and mapreduce worker
-					if err != nil {
-						return nil, err
-					}
-					totalContainersRunning += 1
-				}
-			}
+		err = spinUpContainer(peer, 4, 3) // spins up a container that will run file system master and mapreduce master
+		if err != nil {
+			return err
 		}
 	}
-	return peerWithLowestRam, nil
+
+	return nil
 }
