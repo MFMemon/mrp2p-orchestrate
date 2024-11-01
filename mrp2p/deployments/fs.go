@@ -138,35 +138,51 @@ func MRNodesCreate(peers []*vms.Peer, numOfOutFiles int, filepaths ...string) er
 
 func FSCreate(peers []*vms.Peer) error {
 
-	fsMasterNodes, err := startFsMasterNodes(peers)
-	if err != nil {
-		return err
-	}
-	for i := range fsMasterNodes {
-		masterName := "fsmaster" + strconv.Itoa(i)
-		NodesConnInfo[masterName] = fsMasterNodes[i]
-		CC.FSMasterIds = append(CC.FSMasterIds, masterName)
-	}
+	// fsMasterNodes, err := startFsMasterNodes(peers)
+	// if err != nil {
+	// 	return err
+	// }
+	// for i := range fsMasterNodes {
+	// 	masterName := "fsmaster" + strconv.Itoa(i)
+	// 	NodesConnInfo[masterName] = fsMasterNodes[i]
+	// 	CC.FSMasterIds = append(CC.FSMasterIds, masterName)
+	// }
 
-	fsVolumeNodes, err := startFsVolumeNodes(peers, CC.FSMasterIds)
+	fsMasterNode, err := startFsMasterNode(peers[0].Containers[0])
 	if err != nil {
 		return err
 	}
-	for i := range fsVolumeNodes {
-		volumeName := "fsvolume" + strconv.Itoa(i)
-		NodesConnInfo[volumeName] = fsVolumeNodes[i]
-		CC.FSVolumeIds = append(CC.FSVolumeIds, volumeName)
-	}
+	masterName := "fsmaster"
+	NodesConnInfo[masterName] = fsMasterNode
+	CC.FSMasterIds = append(CC.FSMasterIds, masterName)
 
-	fsFilerNodes, err := startFsFilerNodes(peers, CC.FSMasterIds)
+	// fsVolumeNodes, err := startFsVolumeNodes(peers, CC.FSMasterIds)
+	// if err != nil {
+	// 	return err
+	// }
+	// for i := range fsVolumeNodes {
+	// 	volumeName := "fsvolume" + strconv.Itoa(i)
+	// 	NodesConnInfo[volumeName] = fsVolumeNodes[i]
+	// 	CC.FSVolumeIds = append(CC.FSVolumeIds, volumeName)
+	// }
+
+	fsVolumeNode, err := startFsVolumeNode(peers[0].Containers[0], NodesConnInfo["fsmaster"])
 	if err != nil {
 		return err
 	}
-	for i := range fsFilerNodes {
-		filerName := "fsfiler" + strconv.Itoa(i)
-		NodesConnInfo[filerName] = fsFilerNodes[i]
-		CC.FSFilerIds = append(CC.FSFilerIds, filerName)
-	}
+	volumeName := "fsvolume"
+	NodesConnInfo[volumeName] = fsVolumeNode
+	CC.FSVolumeIds = append(CC.FSVolumeIds, volumeName)
+
+	// fsFilerNodes, err := startFsFilerNodes(peers, CC.FSMasterIds)
+	// if err != nil {
+	// 	return err
+	// }
+	// for i := range fsFilerNodes {
+	// 	filerName := "fsfiler" + strconv.Itoa(i)
+	// 	NodesConnInfo[filerName] = fsFilerNodes[i]
+	// 	CC.FSFilerIds = append(CC.FSFilerIds, filerName)
+	// }
 
 	mrEtcdNodes, err := startMrEtcdNodes(peers)
 	if err != nil {
@@ -181,104 +197,102 @@ func FSCreate(peers []*vms.Peer) error {
 	return nil
 }
 
-func startFsMasterNodes(connectedPeers []*vms.Peer) ([]*NodeConnInfo, error) {
+// func startFsMasterNodes(connectedPeers []*vms.Peer) ([]*NodeConnInfo, error) {
 
-	var masterNodes []*NodeConnInfo
+// 	var masterNodes []*NodeConnInfo
 
-	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsmaster")
+// 	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsmaster")
 
-	if err != nil {
-		utils.Logger().Infof(err.Error())
-	}
+// 	if err != nil {
+// 		utils.Logger().Infof(err.Error())
+// 	}
 
-	fsMasterPeerPorts := make([][]*vms.Port, 0)
-	fsMasterPeerIps := make([]string, 0)
+// 	fsMasterPeerPorts := make([][]*vms.Port, 0)
+// 	fsMasterPeerIps := make([]string, 0)
 
-	for i, _ := range connectedPeers {
-		peer := connectedPeers[i]
-		for j, _ := range peer.Containers {
-			con := peer.Containers[j]
-			conFSMasterPorts := make([]*vms.Port, 0)
+// 	for i, _ := range connectedPeers {
+// 		peer := connectedPeers[i]
+// 		for j, _ := range peer.Containers {
+// 			con := peer.Containers[j]
+// 			conFSMasterPorts := make([]*vms.Port, 0)
 
-			for k := range con.Ports {
-				if con.Ports[k].Name == "FSMasterGrpcPort" || con.Ports[k].Name == "FSMasterHttpPort" {
-					conFSMasterPorts = append(conFSMasterPorts, con.Ports[k])
-				}
-			}
+// 			for k := range con.Ports {
+// 				if con.Ports[k].Name == "FSMasterGrpcPort" || con.Ports[k].Name == "FSMasterHttpPort" {
+// 					conFSMasterPorts = append(conFSMasterPorts, con.Ports[k])
+// 				}
+// 			}
 
-			fsMasterPeerPorts = append(
-				fsMasterPeerPorts,
-				conFSMasterPorts,
-			)
+// 			fsMasterPeerPorts = append(
+// 				fsMasterPeerPorts,
+// 				conFSMasterPorts,
+// 			)
 
-			fsMasterPeerIps = append(fsMasterPeerIps, con.Ip)
+// 			fsMasterPeerIps = append(fsMasterPeerIps, con.Ip)
+// 		}
+// 	}
+
+// 	for i, _ := range connectedPeers {
+// 		peer := connectedPeers[i]
+// 		for j, _ := range peer.Containers {
+// 			con := peer.Containers[j]
+// 			thisPeerAddrIdx := i*len(peer.Containers) + j
+
+// 			targetNodePorts := fsMasterPeerPorts[thisPeerAddrIdx]
+
+// 			targetNodePeerPorts := make([][]*vms.Port, 0)
+// 			targetNodePeerPorts = append(targetNodePeerPorts, fsMasterPeerPorts[0:thisPeerAddrIdx]...)
+// 			targetNodePeerPorts = append(targetNodePeerPorts, fsMasterPeerPorts[thisPeerAddrIdx+1:]...)
+
+// 			targetNodePeerIps := make([]string, 0)
+// 			targetNodePeerIps = append(targetNodePeerIps, fsMasterPeerIps[0:thisPeerAddrIdx]...)
+// 			targetNodePeerIps = append(targetNodePeerIps, fsMasterPeerIps[thisPeerAddrIdx+1:]...)
+
+// 			node, err := startFsMasterNode(con, plugin, targetNodePorts, targetNodePeerPorts, targetNodePeerIps)
+// 			if err != nil {
+// 				return nil, err
+// 			}
+
+// 			masterNodes = append(masterNodes, node)
+// 		}
+// 	}
+// 	return masterNodes, nil
+// }
+
+func startFsMasterNode(con *vms.ContainerInfo) (*NodeConnInfo, error) {
+	// err := abs.Pul
+	requiredPorts := make([]*vms.Port, 0)
+
+	for i := range con.Ports {
+		if con.Ports[i].Name == "FSMasterHttpPort" {
+			requiredPorts = append(requiredPorts, con.Ports[i])
+			con.Ports[i].Taken = true
+		}
+		if con.Ports[i].Name == "FSMasterGrpcPort" {
+			requiredPorts = append(requiredPorts, con.Ports[i])
+			con.Ports[i].Taken = true
+		}
+
+		if len(requiredPorts) == 2 {
+			break
 		}
 	}
-
-	for i, _ := range connectedPeers {
-		peer := connectedPeers[i]
-		for j, _ := range peer.Containers {
-			con := peer.Containers[j]
-			thisPeerAddrIdx := i*len(peer.Containers) + j
-
-			targetNodePorts := fsMasterPeerPorts[thisPeerAddrIdx]
-
-			targetNodePeerPorts := make([][]*vms.Port, 0)
-			targetNodePeerPorts = append(targetNodePeerPorts, fsMasterPeerPorts[0:thisPeerAddrIdx]...)
-			targetNodePeerPorts = append(targetNodePeerPorts, fsMasterPeerPorts[thisPeerAddrIdx+1:]...)
-
-			targetNodePeerIps := make([]string, 0)
-			targetNodePeerIps = append(targetNodePeerIps, fsMasterPeerIps[0:thisPeerAddrIdx]...)
-			targetNodePeerIps = append(targetNodePeerIps, fsMasterPeerIps[thisPeerAddrIdx+1:]...)
-
-			node, err := startFsMasterNode(con, plugin, targetNodePorts, targetNodePeerPorts, targetNodePeerIps)
-			if err != nil {
-				return nil, err
-			}
-
-			masterNodes = append(masterNodes, node)
-		}
-	}
-	return masterNodes, nil
-}
-
-func startFsMasterNode(con *vms.ContainerInfo, plugin string, requiredPorts []*vms.Port,
-	peerPorts [][]*vms.Port, peerIps []string) (*NodeConnInfo, error) {
 
 	nodeConn := new(NodeConnInfo)
 	nodeConn.ContainerId = con.Id
 	nodeConn.Ip = con.Ip
 
-	for i := range requiredPorts {
-		port := requiredPorts[i]
-		if port.Name == "FSMasterGrpcPort" {
-			nodeConn.Grpcport.ContainerPort = port.ContainerPort
-			nodeConn.Grpcport.HostPort = port.HostPort
-		} else {
-			nodeConn.Httpport.ContainerPort = port.ContainerPort
-			nodeConn.Httpport.HostPort = port.HostPort
-		}
+	nodeConn.Httpport.ContainerPort = requiredPorts[0].ContainerPort
+	nodeConn.Httpport.HostPort = requiredPorts[0].HostPort
+	nodeConn.Grpcport.ContainerPort = requiredPorts[1].ContainerPort
+	nodeConn.Grpcport.HostPort = requiredPorts[1].HostPort
+
+	pluginArgs := []string{nodeConn.Grpcport.ContainerPort, nodeConn.Httpport.ContainerPort}
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsmaster")
+	if err != nil {
+		return nil, err
 	}
 
-	peerAddrs := make([]string, 0)
-
-	for i := range peerPorts {
-		for j := range peerPorts[i] {
-			peerPort := peerPorts[i][j]
-			if peerPort.Name == "FSMasterGrpcPort" {
-				peerHostPort, _ := strconv.Atoi(peerPort.HostPort)
-				peerAddrs = append(
-					peerAddrs,
-					fmt.Sprintf("%v:%v", peerIps[i], peerHostPort-10000),
-				)
-				break
-			}
-		}
-	}
-
-	pluginArgs := []string{strings.Join(peerAddrs, ",")}
-
-	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	err = abs.ExecutePlugin(plugin, con.Id, pluginArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -291,34 +305,32 @@ func startFsMasterNode(con *vms.ContainerInfo, plugin string, requiredPorts []*v
 	return nodeConn, nil
 }
 
-func startFsVolumeNodes(connectedPeers []*vms.Peer, fsMasterPeerNames []string) ([]*NodeConnInfo, error) {
-	// err := abs.Pul
-	var volumeNodes []*NodeConnInfo
+// func startFsVolumeNodes(connectedPeers []*vms.Peer, fsMasterPeerNames []string) ([]*NodeConnInfo, error) {
+// 	// err := abs.Pul
+// 	var volumeNodes []*NodeConnInfo
 
-	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsvolume")
+// 	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsvolume")
 
-	if err != nil {
-		utils.Logger().Infof(err.Error())
-	}
+// 	if err != nil {
+// 		utils.Logger().Infof(err.Error())
+// 	}
 
-	for i, _ := range connectedPeers {
-		peer := connectedPeers[i]
-		for j, _ := range peer.Containers {
-			con := peer.Containers[j]
-			node, err := startFsVolumeNode(con, fsMasterPeerNames, plugin)
-			if err != nil {
-				return nil, err
-			}
+// 	for i, _ := range connectedPeers {
+// 		peer := connectedPeers[i]
+// 		for j, _ := range peer.Containers {
+// 			con := peer.Containers[j]
+// 			node, err := startFsVolumeNode(con, fsMasterPeerNames, plugin)
+// 			if err != nil {
+// 				return nil, err
+// 			}
 
-			volumeNodes = append(volumeNodes, node)
-		}
-	}
-	return volumeNodes, nil
-}
+// 			volumeNodes = append(volumeNodes, node)
+// 		}
+// 	}
+// 	return volumeNodes, nil
+// }
 
-func startFsVolumeNode(con *vms.ContainerInfo, fsMasterPeerNames []string,
-	plugin string) (*NodeConnInfo, error) {
-
+func startFsVolumeNode(con *vms.ContainerInfo, fsMasterConnInfo *NodeConnInfo) (*NodeConnInfo, error) {
 	var requiredPort *vms.Port
 
 	for i, _ := range con.Ports {
@@ -335,22 +347,15 @@ func startFsVolumeNode(con *vms.ContainerInfo, fsMasterPeerNames []string,
 	nodeConn.Httpport.ContainerPort = requiredPort.ContainerPort
 	nodeConn.Httpport.HostPort = requiredPort.HostPort
 
-	fsMasterPeerAddrs := make([]string, 0)
+	fsMasterIp := fsMasterConnInfo.Ip
+	fsMasterPort, _ := strconv.Atoi(fsMasterConnInfo.Grpcport.HostPort)
 
-	for i := range fsMasterPeerNames {
-		masterName := fsMasterPeerNames[i]
-		masterIp := NodesConnInfo[masterName].Ip
-		masterPort, _ := strconv.Atoi(NodesConnInfo[masterName].Grpcport.HostPort)
+	plugin, err := abs.PullPlugin("https://github.com/MFMemon/mrp2pfsvolume")
 
-		fsMasterPeerAddrs = append(
-			fsMasterPeerAddrs,
-			fmt.Sprintf("%v:%v", masterIp, masterPort-10000),
-		)
-	}
+	pluginArgs := []string{nodeConn.Httpport.ContainerPort,
+		fmt.Sprintf("%v:%v", fsMasterIp, fsMasterPort-10000)}
 
-	pluginArgs := []string{nodeConn.Httpport.ContainerPort, strings.Join(fsMasterPeerAddrs, ",")}
-
-	err := abs.ExecutePlugin(plugin, con.Id, pluginArgs)
+	err = abs.ExecutePlugin(plugin, con.Id, pluginArgs)
 	if err != nil {
 		return nil, err
 	}
