@@ -11,6 +11,9 @@ import (
 
 	abs "github.com/Akilan1999/p2p-rendering-computation/abstractions"
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/deployments"
+
+	// "github.com/MFMemon/mrp2p-orchestrate/mrp2p/mrjob"
+
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/mrjob"
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/utils"
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/vms"
@@ -23,6 +26,8 @@ var (
 	mrReduceScriptLocalDir = flag.String("r", "", "absolute local path of the reduce function script for mapreduce job")
 	mrReduceOutDirName     = flag.String("o", "", "directory name of the final output files")
 	mrNumOfOutFiles        = flag.Int("n", 2, "number of final output files to be created")
+	startFromBootstrap     = flag.Bool("s", true, "start from bootstrapping the cluster")
+	startFromJobRun        = flag.Bool("j", false, "start from running the job on the cluster")
 	mrInputRemoteDir       = "mrInput"
 	mapFuncRemoteDir       = "mrMapFunc"
 	reduceFuncRemoteDir    = "mrReduceFunc"
@@ -69,69 +74,73 @@ func main() {
 	// 	return
 	// }
 
-	err := cleanUpDir("server", "client", "plugin", "config.json", "cc.json")
+	if !*startFromJobRun {
+
+		err := cleanUpDir("server", "client", "plugin", "config.json", "cc.json")
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		_, err = abs.Init(nil)
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		peers, err := vms.UpdateAvailablePeers()
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		utils.Logger().Infof("Total peers found in the network: %v", len(peers))
+
+		err = vms.SpinUpVms(peers)
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		err = deployments.FSCreate(peers)
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		time.Sleep(time.Second * 60) // wait for file system to be initialized
+
+		_, err = deployments.FSUpload(mrInputRemoteDir, *mrInputLocalDir)
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		mapFuncPath, err := deployments.FSUpload(mapFuncRemoteDir, *mrMapScriptLocalDir)
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		reduceFuncPath, err := deployments.FSUpload(reduceFuncRemoteDir, *mrReduceScriptLocalDir)
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		err = deployments.MRNodesCreate(
+			peers, *mrNumOfOutFiles,
+			mrInputRemoteDir,
+			filepath.Join(mapFuncRemoteDir, mapFuncPath[0]),
+			filepath.Join(reduceFuncRemoteDir, reduceFuncPath[0]),
+			"",
+			*mrReduceOutDirName,
+		)
+		if err != nil {
+			utils.Logger().Fatal(err.Error())
+		}
+
+		utils.Logger().Infof("Cluster deployed sucessfully.")
+
+	}
+
+	err := mrjob.Start()
 	if err != nil {
 		utils.Logger().Fatal(err.Error())
 	}
 
-	_, err = abs.Init(nil)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	peers, err := vms.UpdateAvailablePeers()
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	utils.Logger().Infof("Total peers found in the network: %v", len(peers))
-
-	err = vms.SpinUpVms(peers)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	err = deployments.FSCreate(peers)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	time.Sleep(time.Second * 60) // wait for file system to be initialized
-
-	_, err = deployments.FSUpload(mrInputRemoteDir, *mrInputLocalDir)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	mapFuncPath, err := deployments.FSUpload(mapFuncRemoteDir, *mrMapScriptLocalDir)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	reduceFuncPath, err := deployments.FSUpload(reduceFuncRemoteDir, *mrReduceScriptLocalDir)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	err = deployments.MRNodesCreate(
-		peers, *mrNumOfOutFiles,
-		mrInputRemoteDir,
-		filepath.Join(mapFuncRemoteDir, mapFuncPath[0]),
-		filepath.Join(reduceFuncRemoteDir, reduceFuncPath[0]),
-		"",
-		*mrReduceOutDirName,
-	)
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	utils.Logger().Infof("Cluster deployed sucessfully.")
-
-	err = mrjob.Start()
-	if err != nil {
-		utils.Logger().Fatal(err.Error())
-	}
-
-	utils.Logger().Infof("Job completed.")
+	// utils.Logger().Infof("Job completed.")
 
 }

@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/deployments"
-	"github.com/MFMemon/mrp2p-orchestrate/mrp2p/utils"
+	"github.com/schollz/progressbar/v2"
 )
 
 type MapReduceInitReponse struct {
@@ -24,7 +25,7 @@ type MapReduceProgressReponse struct {
 
 var (
 	httpClient = http.Client{
-		Timeout: time.Second * 5,
+		Timeout: time.Second * 20,
 	}
 
 	TotalMapTasks        int
@@ -32,10 +33,23 @@ var (
 	TotalInputSize       int64
 	CompletedMapTasks    int
 	CompletedReduceTasks int
+	conf                 *deployments.ClusterConfig
 )
 
 func Start() error {
-	err := mrInit()
+
+	f, err := os.ReadFile(deployments.CCPath)
+	if err != nil {
+		return err
+	}
+
+	conf = new(deployments.ClusterConfig)
+	err = json.Unmarshal(f, conf)
+	if err != nil {
+		return err
+	}
+
+	err = mrInit()
 	if err != nil {
 		return err
 	}
@@ -46,6 +60,7 @@ func Start() error {
 			return err
 		}
 	}
+	fmt.Println()
 	return nil
 }
 
@@ -54,47 +69,58 @@ func mrInit() error {
 	responseAwaited := true
 	for responseAwaited {
 
-		for i := range deployments.CC.MRMasterIds {
-			masterId := deployments.CC.MRMasterIds[i]
+		for i := range conf.MRMasterIds {
+			masterId := conf.MRMasterIds[i]
 			masterInitUrl := fmt.Sprintf(
 				"http://%v:%v/init/",
-				deployments.NodesConnInfo[masterId].Ip,
-				deployments.NodesConnInfo[masterId].Httpport.HostPort,
+				conf.MRP2PClusterInfo[masterId].Ip,
+				conf.MRP2PClusterInfo[masterId].Httpport.HostPort,
 			)
 
-			res, err := httpClient.Get(masterInitUrl)
-			defer res.Body.Close()
+			fmt.Printf("sending init request to %v\n", masterInitUrl)
 
-			if err != nil {
-				return err
+			res, _ := httpClient.Get(masterInitUrl)
+
+			// if err != nil {
+			// 	return err
+			// }
+
+			if res == nil {
+				continue
 			}
 
 			if res.StatusCode == 200 {
-				mrInitResponseRaw, err := io.ReadAll(res.Body)
-				if err != nil {
-					return err
-				}
+				mrInitResponseRaw, _ := io.ReadAll(res.Body)
+				// if err != nil {
+				// 	return err
+				// }
 
 				mrInitResponse := new(MapReduceInitReponse)
-				err = json.Unmarshal(mrInitResponseRaw, mrInitResponse)
-				if err != nil {
-					return err
-				}
+				json.Unmarshal(mrInitResponseRaw, mrInitResponse)
+				// if err != nil {
+				// 	return err
+				// }
 
 				TotalMapTasks = mrInitResponse.TotalMapTasks
 				TotalReduceTasks = mrInitResponse.TotalReduceTasks
 				TotalInputSize = mrInitResponse.JobInputSize
 
-				utils.Logger().Infof("TotalMapTasks: %v", TotalMapTasks)
-				utils.Logger().Infof("TotalReduceTasks: %v", TotalReduceTasks)
-				utils.Logger().Infof("TotalInputSize: %vMB", TotalInputSize)
+				if TotalMapTasks <= 0 {
+					continue
+				}
 
 				responseAwaited = false
+
+				defer res.Body.Close()
 				break
 			}
-
+			time.Sleep(time.Second * 3)
 		}
 	}
+
+	fmt.Printf("\nTOTAL MAP TASKS: %v\n", TotalMapTasks)
+	fmt.Printf("TOTAL REDUCE TASKS: %v\n", TotalReduceTasks)
+	fmt.Printf("TOTAL INPUT SIZE: %v\n\n", TotalInputSize)
 
 	return nil
 }
@@ -103,7 +129,14 @@ func mrProgress() error {
 
 	var masterProgressUrl string
 	var httpResponse *http.Response
-	var httpErr error
+	// var httpErr error
+
+	pBar := progressbar.New(TotalMapTasks + TotalReduceTasks)
+
+	// for i := 0; i < 100; i++ {
+	// 	mapBar.Add(1)
+	// 	time.Sleep(40 * time.Millisecond)
+	// }
 
 	mrProgressResponse := new(MapReduceProgressReponse)
 
@@ -111,18 +144,22 @@ func mrProgress() error {
 
 	for responseAwaited {
 
-		for i := range deployments.CC.MRMasterIds {
-			masterId := deployments.CC.MRMasterIds[i]
+		for i := range conf.MRMasterIds {
+			masterId := conf.MRMasterIds[i]
 			masterProgressUrl = fmt.Sprintf(
 				"http://%v:%v/progress/",
-				deployments.NodesConnInfo[masterId].Ip,
-				deployments.NodesConnInfo[masterId].Httpport.HostPort,
+				conf.MRP2PClusterInfo[masterId].Ip,
+				conf.MRP2PClusterInfo[masterId].Httpport.HostPort,
 			)
 
-			httpResponse, httpErr = httpClient.Get(masterProgressUrl)
+			httpResponse, _ = httpClient.Get(masterProgressUrl)
 
-			if httpErr != nil {
-				return httpErr
+			// if httpErr != nil {
+			// 	return httpErr
+			// }
+
+			if httpResponse == nil {
+				continue
 			}
 
 			if httpResponse.StatusCode == 200 {
@@ -132,6 +169,8 @@ func mrProgress() error {
 
 		}
 	}
+
+	prevProgress := CompletedMapTasks + CompletedReduceTasks
 
 	for CompletedReduceTasks < TotalReduceTasks {
 		mrProgressResponseRaw, err := io.ReadAll(httpResponse.Body)
@@ -149,21 +188,28 @@ func mrProgress() error {
 		CompletedMapTasks = max(CompletedMapTasks, mrProgressResponse.CompletedMapTasks)
 		CompletedReduceTasks = max(CompletedReduceTasks, mrProgressResponse.CompletedReduceTasks)
 
-		utils.Logger().Infof("CompletedMapTasks: %v", CompletedMapTasks)
-		utils.Logger().Infof("CompletedReduceTasks: %v", CompletedReduceTasks)
+		pBar.Add(CompletedMapTasks + CompletedReduceTasks - prevProgress)
 
-		httpResponse, httpErr = httpClient.Get(masterProgressUrl)
+		// utils.Logger().Infof("CompletedMapTasks: %v", CompletedMapTasks)
+		// utils.Logger().Infof("CompletedReduceTasks: %v", CompletedReduceTasks)
 
-		if httpErr != nil {
-			return httpErr
-		}
+		httpResponse, _ = httpClient.Get(masterProgressUrl)
 
-		if httpResponse.StatusCode != 200 {
-			if httpResponse != nil {
-				httpResponse.Body.Close()
-			}
+		// if httpErr != nil {
+		// 	return httpErr
+		// }
+
+		if httpResponse == nil {
 			break
 		}
+
+		if httpResponse != nil {
+			if httpResponse.StatusCode != 200 {
+				httpResponse.Body.Close()
+				break
+			}
+		}
+		prevProgress = CompletedMapTasks + CompletedReduceTasks
 	}
 
 	return nil
